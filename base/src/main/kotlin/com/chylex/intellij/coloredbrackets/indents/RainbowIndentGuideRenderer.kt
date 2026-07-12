@@ -77,9 +77,8 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		
 		val guide = editor.indentsModel.caretIndentGuide
 		val selected = if (guide != null) {
-			val caretModel = editor.caretModel
-			val caretOffset = caretModel.offset
-			caretOffset in off until endOffset && caretModel.logicalPosition.column == indentColumn
+			val caretOffset = editor.caretModel.offset
+			caretOffset in off until endOffset && guide.indentLevel == indentColumn
 		}
 		else false
 		
