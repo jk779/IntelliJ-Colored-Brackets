@@ -10,3 +10,5 @@ This is a fork of the [🌈Rainbow Brackets](https://github.com/izhangzhihao/int
 - Improved highlighting performance
 - Increased default setting for maximum line count from 1K to 100K
 - Fixed service initialization warnings reported by 2024.2+
+- Support for Ruby syntax 
+- Highlight current indentation guide while the caret is on it

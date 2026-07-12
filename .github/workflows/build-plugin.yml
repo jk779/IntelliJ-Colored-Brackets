@@ -3,6 +3,8 @@ name: Build and Release Plugin
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -74,5 +76,5 @@ jobs:
             build/distributions/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Colored Brackets self-build #${GITHUB_RUN_NUMBER}" \
-            --notes "Built from the current ${GITHUB_REF_NAME} branch at commit ${GITHUB_SHA}. The Gradle wrapper was validated and the test suite completed before packaging."
+            --title "Colored Brackets #${GITHUB_RUN_NUMBER}" \
+            --notes "Built from ${GITHUB_REF_NAME} branch at commit ${GITHUB_SHA}."
