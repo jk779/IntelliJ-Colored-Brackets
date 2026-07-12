@@ -1,5 +1,6 @@
 package com.chylex.intellij.coloredbrackets.indents
 
+import com.chylex.intellij.coloredbrackets.RainbowHighlighter
 import com.chylex.intellij.coloredbrackets.RainbowInfo
 import com.chylex.intellij.coloredbrackets.util.alphaBlend
 import com.chylex.intellij.coloredbrackets.util.endOffset
@@ -12,6 +13,7 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.SoftWrap
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.ex.util.EditorUtil
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.editor.impl.view.EditorPainter
 import com.intellij.openapi.editor.impl.view.VisualLinesIterator
@@ -27,6 +29,7 @@ import com.intellij.psi.xml.XmlToken
 import com.intellij.psi.xml.XmlTokenType
 import com.intellij.ui.paint.LinePainter2D
 import com.intellij.util.text.CharArrayUtil
+import java.awt.Color
 import java.awt.Graphics
 import java.awt.Graphics2D
 import kotlin.math.max
@@ -37,8 +40,6 @@ import kotlin.math.max
 class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 	override fun paint(editor: Editor, highlighter: RangeHighlighter, g: Graphics) {
 		if (editor !is EditorEx) return
-		
-		val rainbowInfo = getRainbowInfo(editor, highlighter) ?: return
 		
 		val startOffset = highlighter.startOffset
 		val doc = highlighter.document
@@ -61,6 +62,10 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		val indentColumn = startPosition.column
 		
 		if (indentColumn <= 0) return
+
+		val color = getRainbowInfo(editor, highlighter)?.color
+			?: getRubyBlockIndentColor(editor, highlighter, indentColumn)
+			?: return
 		
 		val foldingModel = editor.foldingModel
 		if (foldingModel.isOffsetCollapsed(off)) return
@@ -98,11 +103,11 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		if (start.y >= maxY) return
 		val targetX = max(0, start.x + EditorPainter.getIndentGuideShift(editor)).toDouble()
 		g.color = if (selected) {
-			rainbowInfo.color
+			color
 		}
 		else {
 			val defaultBackground = editor.colorsScheme.defaultBackground
-			rainbowInfo.color.alphaBlend(defaultBackground, 0.2f)
+			color.alphaBlend(defaultBackground, 0.2f)
 		}
 		
 		// There is a possible case that indent line intersects soft wrap-introduced text. Example:
@@ -162,6 +167,47 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 			element is XmlToken && element.tokenType == XmlTokenType.XML_TAG_END
 		}
 		
+		private val RUBY_BLOCK_BOUNDARIES = setOf("end", "else", "elsif", "when", "rescue", "ensure")
+
+		private fun getRubyBlockIndentColor(
+			editor: EditorEx,
+			highlighter: RangeHighlighter,
+			indentColumn: Int,
+		): Color? {
+			val project = editor.project ?: return null
+			val virtualFile = editor.virtualFile?.takeIf { it.isValid } ?: return null
+			val document = editor.document
+
+			val isRubyBlockBoundary = ReadAction.compute<Boolean, Throwable> {
+				val psiFile = PsiManager.getInstance(project).findFile(virtualFile) ?: return@compute false
+				if (!psiFile.language.id.equals("ruby", ignoreCase = true)) return@compute false
+
+				val endOffset = highlighter.endOffset.coerceIn(0, document.textLength)
+				val endLine = document.getLineNumber(endOffset)
+				val lineStart = document.getLineStartOffset(endLine)
+				val lineEnd = document.getLineEndOffset(endLine)
+				val boundary = document.charsSequence
+					.subSequence(lineStart, lineEnd)
+					.toString()
+					.trimStart()
+					.takeWhile { it.isLetter() }
+
+				boundary in RUBY_BLOCK_BOUNDARIES
+			}
+			if (!isRubyBlockBoundary) return null
+
+			val indentSize = EditorUtil.getTabSize(editor).coerceAtLeast(1)
+			val level = (indentColumn / indentSize - 1).coerceAtLeast(0)
+			val key = RainbowHighlighter.getRainbowColorByLevel(
+				editor.colorsScheme,
+				RainbowHighlighter.NAME_ROUND_BRACKETS,
+				level,
+			)
+			return editor.colorsScheme.getAttributes(key)?.foregroundColor
+				?: key.defaultAttributes.foregroundColor
+				?: editor.colorsScheme.defaultForeground
+		}
+
 		private fun getRainbowInfo(editor: EditorEx, highlighter: RangeHighlighter): RainbowInfo? {
 			val virtualFile = editor.virtualFile?.takeIf { it.isValid } ?: return null
 			val document = editor.document
