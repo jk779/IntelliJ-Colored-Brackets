@@ -63,8 +63,8 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		
 		if (indentColumn <= 0) return
 
-		val color = getRainbowInfo(editor, highlighter)?.color
-			?: getRubyBlockIndentColor(editor, highlighter, indentColumn)
+		val color = getRubyBlockIndentColor(editor, highlighter, indentColumn)
+			?: getRainbowInfo(editor, highlighter)?.color
 			?: return
 		
 		val foldingModel = editor.foldingModel
@@ -106,7 +106,7 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		}
 		else {
 			val defaultBackground = editor.colorsScheme.defaultBackground
-			color.alphaBlend(defaultBackground, 0.2f)
+			color.alphaBlend(defaultBackground, 0.4f)
 		}
 		
 		// There is a possible case that indent line intersects soft wrap-introduced text. Example:
@@ -182,16 +182,22 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 				if (!psiFile.language.id.equals("ruby", ignoreCase = true)) return@compute false
 
 				val endOffset = highlighter.endOffset.coerceIn(0, document.textLength)
-				val endLine = document.getLineNumber(endOffset)
-				val lineStart = document.getLineStartOffset(endLine)
-				val lineEnd = document.getLineEndOffset(endLine)
-				val boundary = document.charsSequence
-					.subSequence(lineStart, lineEnd)
-					.toString()
-					.trimStart()
-					.takeWhile { it.isLetter() }
+				var endLine = document.getLineNumber(endOffset)
+				while (endLine >= 0) {
+					val lineStart = document.getLineStartOffset(endLine)
+					val lineEnd = document.getLineEndOffset(endLine)
+					val line = document.charsSequence
+						.subSequence(lineStart, lineEnd)
+						.toString()
+						.trimStart()
 
-				boundary in RUBY_BLOCK_BOUNDARIES
+					if (line.isNotEmpty() && !line.startsWith('#')) {
+						val boundary = line.takeWhile { it.isLetter() }
+						return@compute boundary in RUBY_BLOCK_BOUNDARIES
+					}
+					endLine--
+				}
+				false
 			}
 			if (!isRubyBlockBoundary) return null
 

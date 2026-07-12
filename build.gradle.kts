@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.chylex.intellij.coloredbrackets"
-version = "1.3.1-ruby-indention"
+version = "1.3.2-ruby-indentation"
 
 val ideaVersion = "2025.3"
 
