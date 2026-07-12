@@ -75,12 +75,7 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		
 		if (tailRegion != null && tailRegion === headerRegion) return
 		
-		val guide = editor.indentsModel.caretIndentGuide
-		val selected = if (guide != null) {
-			val caretOffset = editor.caretModel.offset
-			caretOffset in off until endOffset && guide.indentLevel == indentColumn
-		}
-		else false
+		val selected = RainbowIndentsPass.isInnermostGuideAtCaret(editor, highlighter)
 		
 		val lineHeight = editor.getLineHeight()
 		val start = editor.visualPositionToXY(startPosition)
@@ -106,7 +101,7 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		}
 		else {
 			val defaultBackground = editor.colorsScheme.defaultBackground
-			color.alphaBlend(defaultBackground, 0.4f)
+			color.alphaBlend(defaultBackground, 0.3f)
 		}
 		
 		// There is a possible case that indent line intersects soft wrap-introduced text. Example:

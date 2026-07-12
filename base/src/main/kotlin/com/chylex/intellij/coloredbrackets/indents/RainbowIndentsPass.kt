@@ -310,6 +310,16 @@ class RainbowIndentsPass internal constructor(
 		
 		private val RENDERER = RainbowIndentGuideRenderer()
 		
+		internal fun isInnermostGuideAtCaret(editor: Editor, highlighter: RangeHighlighter): Boolean {
+			val caretOffset = editor.caretModel.offset
+			val innermost = editor.getUserData(INDENT_HIGHLIGHTERS_IN_EDITOR_KEY)
+				?.asSequence()
+				?.filter { it.isValid && caretOffset in it.startOffset until it.endOffset }
+				?.maxWithOrNull(compareBy<RangeHighlighter> { it.startOffset }.thenBy { -it.endOffset })
+
+			return innermost === highlighter
+		}
+
 		private fun isRainbowIndentGuidesShown(project: Project): Boolean {
 			if (RainbowSettings.instance.disableRainbowIndentsInZenMode && isZenModeEnabled(project)) {
 				return false
