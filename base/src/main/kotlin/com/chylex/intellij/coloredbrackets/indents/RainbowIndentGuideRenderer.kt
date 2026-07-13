@@ -13,7 +13,6 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.SoftWrap
 import com.intellij.openapi.editor.ex.EditorEx
-import com.intellij.openapi.editor.ex.util.EditorUtil
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.editor.impl.view.EditorPainter
 import com.intellij.openapi.editor.impl.view.VisualLinesIterator
@@ -63,7 +62,7 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		
 		if (indentColumn <= 0) return
 
-		val color = getRubyBlockIndentColor(editor, highlighter, indentColumn)
+		val color = getRubyBlockIndentColor(editor, highlighter)
 			?: getRainbowInfo(editor, highlighter)?.color
 			?: return
 		
@@ -161,43 +160,11 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 			element is XmlToken && element.tokenType == XmlTokenType.XML_TAG_END
 		}
 		
-		private val RUBY_BLOCK_BOUNDARIES = setOf("end", "else", "elsif", "when", "rescue", "ensure")
-
 		private fun getRubyBlockIndentColor(
 			editor: EditorEx,
 			highlighter: RangeHighlighter,
-			indentColumn: Int,
 		): Color? {
-			val project = editor.project ?: return null
-			val virtualFile = editor.virtualFile?.takeIf { it.isValid } ?: return null
-			val document = editor.document
-
-			val isRubyBlockBoundary = ReadAction.compute<Boolean, Throwable> {
-				val psiFile = PsiManager.getInstance(project).findFile(virtualFile) ?: return@compute false
-				if (!psiFile.language.id.equals("ruby", ignoreCase = true)) return@compute false
-
-				val endOffset = highlighter.endOffset.coerceIn(0, document.textLength)
-				var endLine = document.getLineNumber(endOffset)
-				while (endLine >= 0) {
-					val lineStart = document.getLineStartOffset(endLine)
-					val lineEnd = document.getLineEndOffset(endLine)
-					val line = document.charsSequence
-						.subSequence(lineStart, lineEnd)
-						.toString()
-						.trimStart()
-
-					if (line.isNotEmpty() && !line.startsWith('#')) {
-						val boundary = line.takeWhile { it.isLetter() }
-						return@compute boundary in RUBY_BLOCK_BOUNDARIES
-					}
-					endLine--
-				}
-				false
-			}
-			if (!isRubyBlockBoundary) return null
-
-			val indentSize = EditorUtil.getTabSize(editor).coerceAtLeast(1)
-			val level = (indentColumn / indentSize - 1).coerceAtLeast(0)
+			val level = RainbowIndentsPass.getRubyIndentLevel(highlighter) ?: return null
 			val key = RainbowHighlighter.getRainbowColorByLevel(
 				editor.colorsScheme,
 				RainbowHighlighter.NAME_ROUND_BRACKETS,

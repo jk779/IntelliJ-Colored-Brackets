@@ -40,6 +40,9 @@ class RainbowIndentsPass internal constructor(
 	
 	@Volatile
 	private var myRanges = emptyList<TextRange>()
+
+	@Volatile
+	private var myRubyIndentLevels = emptyMap<TextRange, Int>()
 	
 	@Volatile
 	private var myDescriptors = emptyList<IndentGuideDescriptor>()
@@ -51,6 +54,10 @@ class RainbowIndentsPass internal constructor(
 		myDescriptors = buildDescriptors()
 		
 		val ranges = ArrayList<TextRange>()
+		val rubyIndentLevels = HashMap<TextRange, Int>()
+		val isRubyFile = myFile.language.id.equals("ruby", ignoreCase = true)
+		val rubyBlockBoundaryLines = if (isRubyFile) calculateRubyBlockBoundaryLines() else null
+		val indentSize = EditorUtil.getTabSize(myEditor).coerceAtLeast(1)
 		for (descriptor in myDescriptors) {
 			ProgressManager.checkCanceled()
 			val endOffset = if (descriptor.endLine < document.lineCount) {
@@ -59,11 +66,37 @@ class RainbowIndentsPass internal constructor(
 			else {
 				document.textLength
 			}
-			ranges.add(TextRange(document.getLineStartOffset(descriptor.startLine), endOffset))
+			val range = TextRange(document.getLineStartOffset(descriptor.startLine), endOffset)
+			ranges.add(range)
+			val endLine = document.getLineNumber(endOffset.coerceIn(0, document.textLength))
+			if (rubyBlockBoundaryLines?.get(endLine) == true) {
+				rubyIndentLevels[range] = (descriptor.indentLevel / indentSize - 1).coerceAtLeast(0)
+			}
 		}
 		
 		Collections.sort(ranges, Segment.BY_START_OFFSET_THEN_END_OFFSET)
 		myRanges = ranges
+		myRubyIndentLevels = rubyIndentLevels
+	}
+
+	private fun calculateRubyBlockBoundaryLines(): BooleanArray {
+		val result = BooleanArray(document.lineCount)
+		var effectiveLineIsBoundary = false
+
+		for (lineNumber in result.indices) {
+			ProgressManager.checkCanceled()
+			val lineStart = document.getLineStartOffset(lineNumber)
+			val lineEnd = document.getLineEndOffset(lineNumber)
+			val line = document.charsSequence.subSequence(lineStart, lineEnd).trimStart()
+
+			if (line.isNotEmpty() && line.first() != '#') {
+				val boundary = line.takeWhile { it.isLetter() }.toString()
+				effectiveLineIsBoundary = boundary in RUBY_BLOCK_BOUNDARIES
+			}
+			result[lineNumber] = effectiveLineIsBoundary
+		}
+
+		return result
 	}
 	
 	private fun nowStamp(): Long = if (isRainbowIndentGuidesShown(this.myProject)) document.modificationStamp xor (EditorUtil.getTabSize(myEditor).toLong() shl 24) else -1
@@ -105,7 +138,7 @@ class RainbowIndentsPass internal constructor(
 				val cmp = compare(range, highlighter)
 				when {
 					cmp < 0 -> {
-						newHighlighters.add(createHighlighter(mm, range))
+						newHighlighters.add(createHighlighter(mm, range, myRubyIndentLevels[range]))
 						curRange++
 					}
 					
@@ -115,6 +148,7 @@ class RainbowIndentsPass internal constructor(
 					}
 					
 					else    -> {
+						highlighter.putUserData(RUBY_INDENT_LEVEL_KEY, myRubyIndentLevels[range])
 						newHighlighters.add(highlighter)
 						curHighlight++
 						curRange++
@@ -133,11 +167,13 @@ class RainbowIndentsPass internal constructor(
 		val startRangeIndex = curRange
 		DocumentUtil.executeInBulk(document, myRanges.size > 10000) {
 			for (i in startRangeIndex until myRanges.size) {
-				newHighlighters.add(createHighlighter(mm, myRanges[i]))
+				val range = myRanges[i]
+				newHighlighters.add(createHighlighter(mm, range, myRubyIndentLevels[range]))
 			}
 		}
 		
 		myEditor.putUserData(INDENT_HIGHLIGHTERS_IN_EDITOR_KEY, newHighlighters)
+		myEditor.putUserData(ACTIVE_GUIDE_CACHE_KEY, null)
 		myEditor.indentsModel.assumeIndents(myDescriptors)
 	}
 	
@@ -305,20 +341,57 @@ class RainbowIndentsPass internal constructor(
 	}
 	
 	companion object {
+		private val RUBY_BLOCK_BOUNDARIES = setOf("end", "else", "elsif", "when", "rescue", "ensure")
 		private val INDENT_HIGHLIGHTERS_IN_EDITOR_KEY = Key.create<MutableList<RangeHighlighter>>("_INDENT_HIGHLIGHTERS_IN_EDITOR_KEY_")
+		private val RUBY_INDENT_LEVEL_KEY = Key.create<Int>("_RUBY_INDENT_LEVEL_KEY_")
+		private val ACTIVE_GUIDE_CACHE_KEY = Key.create<ActiveGuideCache>("_ACTIVE_INDENT_GUIDE_CACHE_KEY_")
 		private val LAST_TIME_INDENTS_BUILT = Key.create<Long>("_LAST_TIME_INDENTS_BUILT_")
 		
 		private val RENDERER = RainbowIndentGuideRenderer()
 		
-		internal fun isInnermostGuideAtCaret(editor: Editor, highlighter: RangeHighlighter): Boolean {
+		private data class ActiveGuideCache(
+			val caretOffset: Int,
+			val highlighters: List<RangeHighlighter>?,
+			val active: RangeHighlighter?,
+		)
+
+		private fun findInnermostGuideAtCaret(editor: Editor): RangeHighlighter? {
 			val caretOffset = editor.caretModel.offset
-			val innermost = editor.getUserData(INDENT_HIGHLIGHTERS_IN_EDITOR_KEY)
+			return editor.getUserData(INDENT_HIGHLIGHTERS_IN_EDITOR_KEY)
 				?.asSequence()
 				?.filter { it.isValid && caretOffset in it.startOffset until it.endOffset }
 				?.maxWithOrNull(compareBy<RangeHighlighter> { it.startOffset }.thenBy { -it.endOffset })
-
-			return innermost === highlighter
 		}
+
+		private fun activeGuide(editor: Editor): RangeHighlighter? {
+			val caretOffset = editor.caretModel.offset
+			val highlighters = editor.getUserData(INDENT_HIGHLIGHTERS_IN_EDITOR_KEY)
+			val cached = editor.getUserData(ACTIVE_GUIDE_CACHE_KEY)
+			if (cached != null && cached.caretOffset == caretOffset && cached.highlighters === highlighters) {
+				return cached.active
+			}
+
+			return findInnermostGuideAtCaret(editor).also {
+				editor.putUserData(ACTIVE_GUIDE_CACHE_KEY, ActiveGuideCache(caretOffset, highlighters, it))
+			}
+		}
+
+		internal fun isInnermostGuideAtCaret(editor: Editor, highlighter: RangeHighlighter): Boolean {
+			return activeGuide(editor) === highlighter
+		}
+
+		internal fun caretPositionChanged(editor: Editor) {
+			val previous = editor.getUserData(ACTIVE_GUIDE_CACHE_KEY)?.active
+			editor.putUserData(ACTIVE_GUIDE_CACHE_KEY, null)
+			val current = activeGuide(editor)
+
+			if (previous !== current) {
+				editor.contentComponent.repaint()
+			}
+		}
+
+		internal fun getRubyIndentLevel(highlighter: RangeHighlighter): Int? =
+			highlighter.getUserData(RUBY_INDENT_LEVEL_KEY)
 
 		private fun isRainbowIndentGuidesShown(project: Project): Boolean {
 			if (RainbowSettings.instance.disableRainbowIndentsInZenMode && isZenModeEnabled(project)) {
@@ -330,7 +403,7 @@ class RainbowIndentsPass internal constructor(
 		private fun isZenModeEnabled(project: Project) =
 			ToggleZenModeAction.isZenModeEnabled(project)
 		
-		private fun createHighlighter(mm: MarkupModel, range: TextRange): RangeHighlighter {
+		private fun createHighlighter(mm: MarkupModel, range: TextRange, rubyIndentLevel: Int?): RangeHighlighter {
 			return mm.addRangeHighlighter(
 				range.startOffset,
 				range.endOffset,
@@ -338,6 +411,7 @@ class RainbowIndentsPass internal constructor(
 				null,
 				HighlighterTargetArea.EXACT_RANGE
 			).apply {
+				putUserData(RUBY_INDENT_LEVEL_KEY, rubyIndentLevel)
 				customRenderer = RENDERER
 			}
 		}
