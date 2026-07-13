@@ -18,6 +18,8 @@
   ```
 
 - Packaged plugin ZIPs are written to `build/distributions/`.
+- For a local build without host Java or Gradle, run `make`, `make build`, or `./scripts/build-plugin-docker.sh`. It uses Java 17 inside Docker, runs the same `clean check buildPlugin` tasks, and exports the ZIP plus `SHA256SUMS.txt` to `build/docker-distributions/` by default. Override the Make destination with `DOCKER_OUTPUT=/path/to/output`.
+- The Docker build requires BuildKit/Buildx and uses a persistent cache mount for Gradle dependencies. Keep build output and local IDE/cache directories out of the Docker context via `.dockerignore`.
 - `.github/workflows/build-plugin.yml` builds on pushes to `main` and via manual dispatch. It validates the Gradle wrapper, runs tests, creates SHA-256 checksums, uploads a workflow artifact, and publishes a GitHub Release.
 - The workflow checks out the current branch revision; it is deliberately not pinned to a fixed source commit.
 - Increment the version in `build.gradle.kts` for each installable hotfix so RubyMine can distinguish newly built ZIPs from an already installed version.

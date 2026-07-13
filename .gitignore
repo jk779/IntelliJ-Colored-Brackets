@@ -1,7 +1,9 @@
 /.idea/*
 !/.idea/runConfigurations
 
-/.gradle/
-/.kotlin/
-/.intellijPlatform/
-/build/
+.gradle/
+.kotlin/
+.intellijPlatform/
+build/
+out/
+hs_err_pid*

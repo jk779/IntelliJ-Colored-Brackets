@@ -1,0 +1,13 @@
+.git
+.gradle
+.idea
+.intellijPlatform
+.kotlin
+build
+**/build
+**/.gradle
+**/.intellijPlatform
+**/.kotlin
+**/out
+.DS_Store
+hs_err_pid*
