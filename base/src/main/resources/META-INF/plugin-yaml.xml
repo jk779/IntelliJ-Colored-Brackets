@@ -1,0 +1,6 @@
+<idea-plugin>
+  <extensions defaultExtensionNs="com.chylex.coloredbrackets">
+    <indentGuideStyleProvider language="yaml"
+                              implementationClass="com.chylex.intellij.coloredbrackets.indents.provider.YamlIndentGuideStyleProvider" />
+  </extensions>
+</idea-plugin>

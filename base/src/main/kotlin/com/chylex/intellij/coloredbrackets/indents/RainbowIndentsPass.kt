@@ -1,5 +1,9 @@
 package com.chylex.intellij.coloredbrackets.indents
 
+import com.chylex.intellij.coloredbrackets.indents.provider.IndentGuideCandidate
+import com.chylex.intellij.coloredbrackets.indents.provider.IndentGuideStyle
+import com.chylex.intellij.coloredbrackets.indents.provider.IndentGuideStyleContext
+import com.chylex.intellij.coloredbrackets.indents.provider.IndentGuideStyleProviders
 import com.chylex.intellij.coloredbrackets.settings.RainbowSettings
 import com.intellij.codeHighlighting.TextEditorHighlightingPass
 import com.intellij.codeInsight.highlighting.BraceMatchingUtil
@@ -26,7 +30,6 @@ import com.intellij.util.text.CharArrayUtil
 import it.unimi.dsi.fastutil.ints.IntArrayList
 import java.lang.StrictMath.abs
 import java.lang.StrictMath.min
-import java.util.Collections
 
 /** From [com.intellij.codeInsight.daemon.impl.IndentsPass]
  * Commit history: https://sourcegraph.com/github.com/JetBrains/intellij-community/-/blob/platform/lang-impl/src/com/intellij/codeInsight/daemon/impl/IndentsPass.java#tab=history
@@ -39,10 +42,7 @@ class RainbowIndentsPass internal constructor(
 ) : TextEditorHighlightingPass(project, myEditor.document, false), DumbAware {
 	
 	@Volatile
-	private var myRanges = emptyList<TextRange>()
-
-	@Volatile
-	private var myRubyIndentLevels = emptyMap<TextRange, Int>()
+	private var myRanges = emptyList<StyledRange>()
 	
 	@Volatile
 	private var myDescriptors = emptyList<IndentGuideDescriptor>()
@@ -53,11 +53,7 @@ class RainbowIndentsPass internal constructor(
 		
 		myDescriptors = buildDescriptors()
 		
-		val ranges = ArrayList<TextRange>()
-		val rubyIndentLevels = HashMap<TextRange, Int>()
-		val isRubyFile = myFile.language.id.equals("ruby", ignoreCase = true)
-		val rubyBlockBoundaryLines = if (isRubyFile) calculateRubyBlockBoundaryLines() else null
-		val indentSize = EditorUtil.getTabSize(myEditor).coerceAtLeast(1)
+		val candidates = ArrayList<IndentGuideCandidate>()
 		for (descriptor in myDescriptors) {
 			ProgressManager.checkCanceled()
 			val endOffset = if (descriptor.endLine < document.lineCount) {
@@ -66,37 +62,31 @@ class RainbowIndentsPass internal constructor(
 			else {
 				document.textLength
 			}
-			val range = TextRange(document.getLineStartOffset(descriptor.startLine), endOffset)
-			ranges.add(range)
-			val endLine = document.getLineNumber(endOffset.coerceIn(0, document.textLength))
-			if (rubyBlockBoundaryLines?.get(endLine) == true) {
-				rubyIndentLevels[range] = (descriptor.indentLevel / indentSize - 1).coerceAtLeast(0)
-			}
+			candidates.add(IndentGuideCandidate(
+				descriptor,
+				TextRange(document.getLineStartOffset(descriptor.startLine), endOffset),
+			))
 		}
-		
-		Collections.sort(ranges, Segment.BY_START_OFFSET_THEN_END_OFFSET)
-		myRanges = ranges
-		myRubyIndentLevels = rubyIndentLevels
-	}
 
-	private fun calculateRubyBlockBoundaryLines(): BooleanArray {
-		val result = BooleanArray(document.lineCount)
-		var effectiveLineIsBoundary = false
-
-		for (lineNumber in result.indices) {
+		val context = IndentGuideStyleContext(
+			file = myFile,
+			document = document,
+			indentSize = EditorUtil.getTabSize(myEditor).coerceAtLeast(1),
+		)
+		val styles = HashMap<IndentGuideCandidate, IndentGuideStyle>()
+		for (provider in IndentGuideStyleProviders.allForLanguage(myFile.language)) {
 			ProgressManager.checkCanceled()
-			val lineStart = document.getLineStartOffset(lineNumber)
-			val lineEnd = document.getLineEndOffset(lineNumber)
-			val line = document.charsSequence.subSequence(lineStart, lineEnd).trimStart()
-
-			if (line.isNotEmpty() && line.first() != '#') {
-				val boundary = line.takeWhile { it.isLetter() }.toString()
-				effectiveLineIsBoundary = boundary in RUBY_BLOCK_BOUNDARIES
+			for ((candidate, style) in provider.getStyles(context, candidates)) {
+				val currentStyle = styles[candidate]
+				if (currentStyle == null || style.precedence > currentStyle.precedence) {
+					styles[candidate] = style
+				}
 			}
-			result[lineNumber] = effectiveLineIsBoundary
 		}
 
-		return result
+		myRanges = candidates
+			.map { candidate -> StyledRange(candidate.range, styles[candidate]) }
+			.sortedWith { first, second -> Segment.BY_START_OFFSET_THEN_END_OFFSET.compare(first.range, second.range) }
 	}
 	
 	private fun nowStamp(): Long = if (isRainbowIndentGuidesShown(this.myProject)) document.modificationStamp xor (EditorUtil.getTabSize(myEditor).toLong() shl 24) else -1
@@ -131,14 +121,15 @@ class RainbowIndentsPass internal constructor(
 			
 			var curHighlight = 0
 			while (curRange < myRanges.size && curHighlight < oldHighlighters.size) {
-				val range = myRanges[curRange]
+				val styledRange = myRanges[curRange]
+				val range = styledRange.range
 				val highlighter = oldHighlighters[curHighlight]
 				if (!highlighter.isValid) break
 				
 				val cmp = compare(range, highlighter)
 				when {
 					cmp < 0 -> {
-						newHighlighters.add(createHighlighter(mm, range, myRubyIndentLevels[range]))
+						newHighlighters.add(createHighlighter(mm, range, styledRange.style))
 						curRange++
 					}
 					
@@ -148,7 +139,7 @@ class RainbowIndentsPass internal constructor(
 					}
 					
 					else    -> {
-						highlighter.putUserData(RUBY_INDENT_LEVEL_KEY, myRubyIndentLevels[range])
+						highlighter.putUserData(INDENT_GUIDE_STYLE_KEY, styledRange.style)
 						newHighlighters.add(highlighter)
 						curHighlight++
 						curRange++
@@ -167,8 +158,8 @@ class RainbowIndentsPass internal constructor(
 		val startRangeIndex = curRange
 		DocumentUtil.executeInBulk(document, myRanges.size > 10000) {
 			for (i in startRangeIndex until myRanges.size) {
-				val range = myRanges[i]
-				newHighlighters.add(createHighlighter(mm, range, myRubyIndentLevels[range]))
+				val styledRange = myRanges[i]
+				newHighlighters.add(createHighlighter(mm, styledRange.range, styledRange.style))
 			}
 		}
 		
@@ -341,9 +332,8 @@ class RainbowIndentsPass internal constructor(
 	}
 	
 	companion object {
-		private val RUBY_BLOCK_BOUNDARIES = setOf("end", "else", "elsif", "when", "rescue", "ensure")
 		private val INDENT_HIGHLIGHTERS_IN_EDITOR_KEY = Key.create<MutableList<RangeHighlighter>>("_INDENT_HIGHLIGHTERS_IN_EDITOR_KEY_")
-		private val RUBY_INDENT_LEVEL_KEY = Key.create<Int>("_RUBY_INDENT_LEVEL_KEY_")
+		private val INDENT_GUIDE_STYLE_KEY = Key.create<IndentGuideStyle>("_INDENT_GUIDE_STYLE_KEY_")
 		private val ACTIVE_GUIDE_CACHE_KEY = Key.create<ActiveGuideCache>("_ACTIVE_INDENT_GUIDE_CACHE_KEY_")
 		private val LAST_TIME_INDENTS_BUILT = Key.create<Long>("_LAST_TIME_INDENTS_BUILT_")
 		
@@ -390,8 +380,8 @@ class RainbowIndentsPass internal constructor(
 			}
 		}
 
-		internal fun getRubyIndentLevel(highlighter: RangeHighlighter): Int? =
-			highlighter.getUserData(RUBY_INDENT_LEVEL_KEY)
+		internal fun getStyle(highlighter: RangeHighlighter): IndentGuideStyle? =
+			highlighter.getUserData(INDENT_GUIDE_STYLE_KEY)
 
 		private fun isRainbowIndentGuidesShown(project: Project): Boolean {
 			if (RainbowSettings.instance.disableRainbowIndentsInZenMode && isZenModeEnabled(project)) {
@@ -403,7 +393,7 @@ class RainbowIndentsPass internal constructor(
 		private fun isZenModeEnabled(project: Project) =
 			ToggleZenModeAction.isZenModeEnabled(project)
 		
-		private fun createHighlighter(mm: MarkupModel, range: TextRange, rubyIndentLevel: Int?): RangeHighlighter {
+		private fun createHighlighter(mm: MarkupModel, range: TextRange, style: IndentGuideStyle?): RangeHighlighter {
 			return mm.addRangeHighlighter(
 				range.startOffset,
 				range.endOffset,
@@ -411,7 +401,7 @@ class RainbowIndentsPass internal constructor(
 				null,
 				HighlighterTargetArea.EXACT_RANGE
 			).apply {
-				putUserData(RUBY_INDENT_LEVEL_KEY, rubyIndentLevel)
+				putUserData(INDENT_GUIDE_STYLE_KEY, style)
 				customRenderer = RENDERER
 			}
 		}
@@ -421,4 +411,9 @@ class RainbowIndentsPass internal constructor(
 			return if (answer != 0) answer else r.endOffset - h.endOffset
 		}
 	}
+
+	private data class StyledRange(
+		val range: TextRange,
+		val style: IndentGuideStyle?,
+	)
 }

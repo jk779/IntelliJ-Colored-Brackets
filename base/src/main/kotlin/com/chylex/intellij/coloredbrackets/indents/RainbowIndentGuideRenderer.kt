@@ -2,6 +2,7 @@ package com.chylex.intellij.coloredbrackets.indents
 
 import com.chylex.intellij.coloredbrackets.RainbowHighlighter
 import com.chylex.intellij.coloredbrackets.RainbowInfo
+import com.chylex.intellij.coloredbrackets.indents.provider.IndentGuideStyle
 import com.chylex.intellij.coloredbrackets.util.alphaBlend
 import com.chylex.intellij.coloredbrackets.util.endOffset
 import com.chylex.intellij.coloredbrackets.util.findNextSibling
@@ -62,9 +63,14 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 		
 		if (indentColumn <= 0) return
 
-		val color = getRubyBlockIndentColor(editor, highlighter)
-			?: getRainbowInfo(editor, highlighter)?.color
-			?: return
+		val style = RainbowIndentsPass.getStyle(highlighter)
+		val styleColor = style?.let { getStyleColor(editor, it) }
+		val color = if (style?.precedence == IndentGuideStyle.Precedence.OVERRIDE_BRACKET_COLOR) {
+			styleColor
+		}
+		else {
+			getRainbowInfo(editor, highlighter)?.color ?: styleColor
+		} ?: return
 		
 		val foldingModel = editor.foldingModel
 		if (foldingModel.isOffsetCollapsed(off)) return
@@ -160,15 +166,14 @@ class RainbowIndentGuideRenderer : CustomHighlighterRenderer {
 			element is XmlToken && element.tokenType == XmlTokenType.XML_TAG_END
 		}
 		
-		private fun getRubyBlockIndentColor(
+		private fun getStyleColor(
 			editor: EditorEx,
-			highlighter: RangeHighlighter,
-		): Color? {
-			val level = RainbowIndentsPass.getRubyIndentLevel(highlighter) ?: return null
+			style: IndentGuideStyle,
+		): Color {
 			val key = RainbowHighlighter.getRainbowColorByLevel(
 				editor.colorsScheme,
-				RainbowHighlighter.NAME_ROUND_BRACKETS,
-				level,
+				style.palette,
+				style.level,
 			)
 			return editor.colorsScheme.getAttributes(key)?.foregroundColor
 				?: key.defaultAttributes.foregroundColor

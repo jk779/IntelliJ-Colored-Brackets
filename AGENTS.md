@@ -33,6 +33,17 @@ The Ruby support added in this fork lives primarily in:
 - `base/src/main/kotlin/com/chylex/intellij/coloredbrackets/indents/RainbowIndentGuideRenderer.kt`
 - `base/src/main/kotlin/com/chylex/intellij/coloredbrackets/indents/RainbowIndentsPass.kt`
 - `base/src/main/kotlin/com/chylex/intellij/coloredbrackets/indents/RainbowIndentCaretListener.kt`
+- `base/src/main/kotlin/com/chylex/intellij/coloredbrackets/indents/provider/`
+
+### Provider architecture
+
+- `RainbowIndentsPass` discovers and maintains guide ranges but must remain language-agnostic.
+- `IndentGuideStyleProvider` is a language extension point. Each provider receives all guide candidates for one highlighting pass and may attach an `IndentGuideStyle` containing a palette, structural level, and precedence. Multiple providers may be registered for the same language.
+- Register providers through `com.chylex.coloredbrackets.indentGuideStyleProvider`. Providers that depend on optional language-plugin classes belong in that plugin's optional descriptor, such as `plugin-yaml.xml`.
+- `FALLBACK` styles preserve real bracket-derived colors when available. Use `OVERRIDE_BRACKET_COLOR` only when the provider has positively identified a language block whose configured indentation color must take precedence over stale or unrelated bracket metadata.
+- When providers classify the same candidate, `OVERRIDE_BRACKET_COLOR` wins over `FALLBACK`; providers with equal precedence retain registration order. Prefer non-overlapping classifiers when possible.
+- Keep language detection, PSI traversal, and document scans inside providers. The renderer must only resolve the stored style and paint it.
+- Add another block-aware language by implementing and registering another provider; do not add language checks to `RainbowIndentsPass` or `RainbowIndentGuideRenderer`.
 
 ### Ruby block detection
 
@@ -87,6 +98,12 @@ This makes the current block guide active when the caret is anywhere inside the 
 `RainbowIndentCaretListener` invalidates the active-guide cache on explicit caret movement and repaints the editor only when the active guide changes. The cache also compares the current caret offset so document-induced caret movement during typing cannot leave it stale. Do not restore a full highlighter-list scan for every guide in `paint`; that turns a repaint into quadratic work and causes visibly progressive guide updates.
 
 Document changes still invalidate the normal indentation highlighting pass. This is required to keep guide ranges correct, and IntelliJ schedules that work as a cancellable background highlighting pass. Ruby-specific boundary classification must remain a single linear scan per pass; it must not be repeated per guide or per painted segment.
+
+### YAML block detection
+
+- YAML indentation guides use `YamlIndentGuideStyleProvider` and fallback to real bracket colors for flow-style collections.
+- YAML colors follow structural guide nesting rather than dividing the raw indentation column by the configured indent size. This keeps sequence-item indentation jumps from skipping palette levels.
+- Indentation inside `YAMLBlockScalar` values (`|` and `>`) is text content, not nested YAML structure, and must not receive provider styles.
 
 ### Guide colors
 

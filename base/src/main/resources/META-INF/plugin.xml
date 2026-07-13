@@ -56,10 +56,14 @@
   <depends optional="true" config-file="plugin-rider.xml">com.intellij.modules.rider</depends>
   <depends optional="true" config-file="plugin-sh.xml">com.jetbrains.sh</depends>
   <depends optional="true" config-file="plugin-sql.xml">com.intellij.database</depends>
+  <depends optional="true" config-file="plugin-yaml.xml">org.jetbrains.plugins.yaml</depends>
   
   <extensionPoints>
     <extensionPoint name="bracePairProvider" beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
       <with attribute="implementationClass" implements="com.chylex.intellij.coloredbrackets.provider.BracePairProvider" />
+    </extensionPoint>
+    <extensionPoint name="indentGuideStyleProvider" beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
+      <with attribute="implementationClass" implements="com.chylex.intellij.coloredbrackets.indents.provider.IndentGuideStyleProvider" />
     </extensionPoint>
   </extensionPoints>
   
@@ -77,6 +81,11 @@
     <editorFactoryListener implementation="com.chylex.intellij.coloredbrackets.indents.RainbowIndentCaretListener" />
     <highlightingPassFactory implementation="com.chylex.intellij.coloredbrackets.indents.RainbowIndentsPassFactory" />
     <editorNotificationProvider implementation="com.chylex.intellij.coloredbrackets.RainbowifyBanner" />
+  </extensions>
+
+  <extensions defaultExtensionNs="com.chylex.coloredbrackets">
+    <indentGuideStyleProvider language="ruby"
+                              implementationClass="com.chylex.intellij.coloredbrackets.indents.provider.RubyIndentGuideStyleProvider" />
   </extensions>
   
   <applicationListeners>
